@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	"gator/internal/database"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 func handlerReset(s *State, cmd Command) error {
@@ -90,6 +92,24 @@ func handlerAgg(s *State, cmd Command) error {
 	}
 }
 
+var rssTimeFormats = []string{
+	time.RFC1123Z,
+	time.RFC1123,
+	time.RFC3339,
+	"2006-01-02T15:04:05Z",
+	"Mon, 2 Jan 2006 15:04:05 -0700",
+	"Mon, 2 Jan 2006 15:04:05 MST",
+}
+
+func parsePublishedAt(raw string) sql.NullTime {
+	for _, format := range rssTimeFormats {
+		if t, err := time.Parse(format, raw); err == nil {
+			return sql.NullTime{Time: t, Valid: true}
+		}
+	}
+	return sql.NullTime{}
+}
+
 func scrapeFeeds(s *State) {
 	feed, err := s.db.GetNextFeedToFetch(context.Background())
 	if err != nil {
@@ -110,6 +130,21 @@ func scrapeFeeds(s *State) {
 	}
 
 	for _, item := range rssFeed.Channel.Item {
-		fmt.Println(item.Title)
+		_, err := s.db.CreatePost(context.Background(), database.CreatePostParams{
+			ID:          uuid.New(),
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+			Title:       item.Title,
+			Url:         item.Link,
+			Description: sql.NullString{String: item.Description, Valid: item.Description != ""},
+			PublishedAt: parsePublishedAt(item.PubDate),
+			FeedID:      feed.ID,
+		})
+		if err != nil {
+			if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+				continue
+			}
+			fmt.Printf("error saving post %s: %+v\n", item.Link, err)
+		}
 	}
 }

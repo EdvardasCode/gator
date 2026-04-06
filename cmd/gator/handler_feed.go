@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"gator/internal/database"
@@ -82,6 +83,27 @@ func handlerUnfollow(s *State, cmd Command, user database.User) error {
 	}
 
 	fmt.Printf("unfollowed %s\n", feed.Name)
+	return nil
+}
+
+func handlerBrowse(s *State, cmd Command, user database.User) error {
+	limit := int32(2)
+	if len(cmd.arguments) == 1 {
+		parsed, err := strconv.Atoi(cmd.arguments[0])
+		if err != nil {
+			return fmt.Errorf("invalid limit %q: must be a number", cmd.arguments[0])
+		}
+		limit = int32(parsed)
+	}
+
+	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{UserID: user.ID, Limit: limit})
+	if err != nil {
+		return fmt.Errorf("failed to fetch posts: %+v", err)
+	}
+
+	for _, post := range posts {
+		fmt.Printf("%s\n%s\n\n", post.Title, post.Url)
+	}
 	return nil
 }
 
